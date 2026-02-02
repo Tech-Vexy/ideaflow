@@ -14,8 +14,10 @@ class HiveService {
     await Hive.initFlutter();
     Hive.registerAdapter(IdeaAdapter());
     Hive.registerAdapter(BrainstormSessionAdapter());
+    Hive.registerAdapter(ArrayChatMessageAdapter());
     await Hive.openBox<Idea>(ideasBoxName);
     await Hive.openBox<BrainstormSession>(sessionsBoxName);
+    await Hive.openBox<ArrayChatMessage>('messages');
   }
 
   // CRUD for Ideas
@@ -41,6 +43,11 @@ class HiveService {
 
   Future<void> deleteIdea(String id) async {
     await ideasBox.delete(id);
+  }
+
+  Future<void> saveMessage(ArrayChatMessage message) async {
+    final box = Hive.box<ArrayChatMessage>('messages');
+    await box.put(message.id, message);
   }
 
   // CRUD for Sessions

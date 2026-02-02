@@ -60,4 +60,27 @@ class FirebaseService {
     }
     return sessions;
   }
+
+  Future<void> saveMessage(ArrayChatMessage message) async {
+    final uid = _userId;
+    if (uid == null) return;
+    // Save message nested under the idea for easy retrieval
+    await _db
+        .ref('users/$uid/ideas/${message.ideaId}/messages/${message.id}')
+        .set(message.toJson());
+  }
+
+  // Global Config (API Keys) - Admin Only effectively
+  Future<void> saveGlobalConfig(
+    String service,
+    Map<String, dynamic> config,
+  ) async {
+    await _db.ref('config/api_keys/$service').set(config);
+  }
+
+  Future<Map<String, dynamic>?> getGlobalConfig() async {
+    final snapshot = await _db.ref('config/api_keys').get();
+    if (!snapshot.exists || snapshot.value == null) return null;
+    return Map<String, dynamic>.from(snapshot.value as Map);
+  }
 }

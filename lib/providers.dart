@@ -7,13 +7,42 @@ import 'services/tts_service.dart';
 import 'services/hive_service.dart';
 import 'services/firebase_service.dart';
 import 'services/sync_service.dart';
+import 'services/secure_storage_service.dart';
+import 'services/groq_service.dart';
+import 'services/ai_router_service.dart';
 import 'models/models.dart';
+
+// Secure Storage Provider
+final secureStorageServiceProvider = Provider<SecureStorageService>((ref) {
+  return SecureStorageService();
+});
+
+// Watson Service Provider
+final watsonServiceProvider = Provider<WatsonService>((ref) {
+  final secureStorage = ref.watch(secureStorageServiceProvider);
+  return WatsonService(secureStorage);
+});
 
 // Sync Service Provider
 final syncServiceProvider = Provider<SyncService>((ref) {
   final firebase = ref.watch(firebaseServiceProvider);
   final hive = ref.watch(hiveServiceProvider);
-  return SyncService(firebase, hive);
+  final secureStorage = ref.watch(secureStorageServiceProvider);
+  return SyncService(firebase, hive, secureStorage);
+});
+
+// Groq Service Provider
+final groqServiceProvider = Provider<GroqService>((ref) {
+  final secureStorage = ref.watch(secureStorageServiceProvider);
+  return GroqService(secureStorage);
+});
+
+// AI Router Service Provider
+final aiRouterServiceProvider = Provider<AiRouterService>((ref) {
+  final groq = ref.watch(groqServiceProvider);
+  final watson = ref.watch(watsonServiceProvider);
+  final secureStorage = ref.watch(secureStorageServiceProvider);
+  return AiRouterService(groq, watson, secureStorage);
 });
 
 // Firebase Service Provider
@@ -24,11 +53,6 @@ final firebaseServiceProvider = Provider<FirebaseService>((ref) {
 // Offline AI Service Provider
 final offlineAiServiceProvider = Provider<OfflineAiService>((ref) {
   return OfflineAiService();
-});
-
-// Watson Service Provider
-final watsonServiceProvider = Provider<WatsonService>((ref) {
-  return WatsonService();
 });
 
 // Voice Service Provider
@@ -43,8 +67,7 @@ final authServiceProvider = Provider<AuthService>((ref) {
 
 // TTS Service Provider
 final ttsServiceProvider = Provider<TtsService>((ref) {
-  final watsonService = ref.watch(watsonServiceProvider);
-  return TtsService(watsonService);
+  return TtsService();
 });
 
 // Hive Service Provider (initialized in main.dart)

@@ -24,7 +24,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       extendBody: true, // Allow body to render behind the navbar
-      body: _screens[_selectedIndex],
+      body: Stack(
+        children: [
+          // Global Gradient Background
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0F2027), // Deep Dark Blue
+                  Color(0xFF203A43), // Forest/Teal Dark
+                  Color(0xFF2C5364), // Lighter Blue-Grey
+                ],
+              ),
+            ),
+          ),
+          // Content Layer
+          IndexedStack(index: _selectedIndex, children: _screens),
+        ],
+      ),
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
         child: ClipRRect(
@@ -57,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   _NavBarItem(
                     icon: Icons.history_rounded,
-                    label: "Archive",
+                    label: "Your Ideas",
                     isSelected: _selectedIndex == 1,
                     onTap: () => setState(() => _selectedIndex = 1),
                   ),

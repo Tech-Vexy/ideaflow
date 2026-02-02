@@ -34,109 +34,118 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
       onRefresh: () async {
         await ref.read(syncServiceProvider).syncFromCloud();
       },
-      child: CustomScrollView(
-        slivers: [
-          SliverAppBar.large(
-            title: const Text("Archive"),
-            centerTitle: false,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(60),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: SearchBar(
-                  controller: _searchController,
-                  hintText: "Search ideas...",
-                  leading: const Icon(Icons.search, color: Colors.grey),
-                  onChanged: (value) {
-                    ref.read(searchQueryProvider.notifier).update(value);
-                  },
-                  elevation: WidgetStateProperty.all(0),
-                  backgroundColor: WidgetStateProperty.all(
-                    theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.5,
-                    ),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: CustomScrollView(
+            slivers: [
+              SliverAppBar.large(
+                title: const Text("Your Ideas"),
+                centerTitle: false,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
                   ),
-                  trailing: isSearching
-                      ? [
-                          IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () {
-                              _searchController.clear();
-                              ref.read(searchQueryProvider.notifier).update('');
-                            },
-                          ),
-                        ]
-                      : null,
-                ),
-              ),
-            ),
-          ),
-          if (isSearching)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 8,
-                ),
-                child: Text(
-                  "${ideas.length} ${ideas.length == 1 ? 'match' : 'matches'} found",
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.bold,
+                ],
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(60),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: SearchBar(
+                      controller: _searchController,
+                      hintText: "Search ideas...",
+                      leading: const Icon(Icons.search, color: Colors.grey),
+                      onChanged: (value) {
+                        ref.read(searchQueryProvider.notifier).update(value);
+                      },
+                      elevation: WidgetStateProperty.all(0),
+                      backgroundColor: WidgetStateProperty.all(
+                        theme.colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
+                      trailing: isSearching
+                          ? [
+                              IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  ref
+                                      .read(searchQueryProvider.notifier)
+                                      .update('');
+                                },
+                              ),
+                            ]
+                          : null,
+                    ),
                   ),
                 ),
               ),
-            ),
-          if (ideas.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      isSearching ? Icons.search_off : Icons.lightbulb_outline,
-                      size: 48,
-                      color: theme.colorScheme.onSurfaceVariant,
+              if (isSearching)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 8,
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      isSearching
-                          ? "No matching ideas found."
-                          : "No ideas yet. Start a flow!",
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                    child: Text(
+                      "${ideas.length} ${ideas.length == 1 ? 'match' : 'matches'} found",
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ],
-                ),
-              ),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final idea = ideas[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
                   ),
-                  child: _IdeaCard(idea: idea),
-                );
-              }, childCount: ideas.length),
-            ),
-        ],
+                ),
+              if (ideas.isEmpty)
+                SliverFillRemaining(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isSearching
+                              ? Icons.search_off
+                              : Icons.lightbulb_outline,
+                          size: 48,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          isSearching
+                              ? "No matching ideas found."
+                              : "No ideas yet. Start a flow!",
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final idea = ideas[index];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: _IdeaCard(idea: idea),
+                    );
+                  }, childCount: ideas.length),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

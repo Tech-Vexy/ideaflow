@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:uuid/uuid.dart';
 import '../providers.dart';
+import '../models/models.dart';
+import 'settings_screen.dart';
 
 class ConversationalScreen extends ConsumerStatefulWidget {
   const ConversationalScreen({super.key});
@@ -138,9 +141,6 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
       _isAborted = false;
     });
 
-    // 2. Send to Watson (Stream)
-    final watson = ref.read(watsonServiceProvider);
-
     // Build context from previous messages (last 6 messages)
     final historyBuffer = StringBuffer();
     final recentMessages = _messages.length > 6
@@ -169,43 +169,43 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
       // OFFLINE MODE
       try {
         final offlineAi = ref.read(offlineAiServiceProvider);
-
-        // Show "Offline Mode" indicator briefly (optional, or just handle via UI)
         if (kDebugMode) print("Using Offline AI Service");
 
-        var response = "";
         final stream = await offlineAi.startBrainstorming(transcript);
 
         await for (final chunk in stream) {
           if (_isAborted) break;
-          response += chunk;
+          // Clean up response if needed
+          final cleanChunk = chunk;
+          fullResponse += cleanChunk;
+
           setState(() {
             if (!firstChunkReceived) {
               if (_messages.isNotEmpty && _messages.last.isThinking) {
                 _messages.removeLast();
               }
-              _messages.add(ChatMessage(text: response, isUser: false));
+              _messages.add(ChatMessage(text: fullResponse, isUser: false));
               firstChunkReceived = true;
             } else {
               if (_messages.isNotEmpty && !_messages.last.isUser) {
                 _messages.removeLast();
-                _messages.add(ChatMessage(text: response, isUser: false));
+                _messages.add(ChatMessage(text: fullResponse, isUser: false));
               }
             }
             _scrollToBottom();
           });
         }
-        fullResponse = response;
       } catch (e) {
         debugPrint("Offline AI Error: $e");
         fullResponse = "I'm offline and encountered an error processing that.";
       }
     } else {
-      // ONLINE MODE (Watson)
+      // ONLINE MODE (Auto-Routed via AiRouterService)
       try {
-        final stream = watson.analyzeIdeaStream(
+        final router = ref.read(aiRouterServiceProvider);
+        final stream = router.routeRequest(
           transcript,
-          previousContext: historyBuffer.toString(),
+          context: historyBuffer.toString(),
         );
 
         await for (final chunk in stream) {
@@ -241,7 +241,6 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
     if (_isAborted) {
       debugPrint("Processing aborted, ignoring result.");
       setState(() {
-        // Cleanup if needed
         _isProcessing = false;
       });
       return;
@@ -287,6 +286,80 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
     // Sync to Firebase Cloud
     await firebaseService.saveIdea(idea);
     await firebaseService.saveSession(session);
+
+    // Save Chat Messages (Granular History)
+    final userMsgId = const Uuid().v4();
+    final userMsg = ArrayChatMessage(
+      id: userMsgId,
+      ideaId: idea.id,
+      text: transcript,
+      isUser: true,
+      timestamp: DateTime.now().subtract(const Duration(seconds: 5)),
+    );
+
+    final aiMsgId = const Uuid().v4();
+    final aiMsg = ArrayChatMessage(
+      id: aiMsgId,
+      ideaId: idea.id,
+      text: aiInsight,
+      isUser: false,
+      timestamp: DateTime.now(),
+    );
+
+    // Persist Messages
+    await hiveService.saveMessage(userMsg);
+    await hiveService.saveMessage(aiMsg);
+    await firebaseService.saveMessage(userMsg);
+    await firebaseService.saveMessage(aiMsg);
+  }
+
+  Future<void> _editMessage(int index, String currentText) async {
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController(text: currentText);
+        return AlertDialog(
+          title: const Text("Edit Message"),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: "Update your message...",
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newText != null && newText.isNotEmpty && newText != currentText) {
+      setState(() {
+        // Create new message with updated text but same other properties
+        final oldMsg = _messages[index];
+        _messages[index] = ChatMessage(
+          text: newText,
+          isUser: oldMsg.isUser,
+          isThinking: oldMsg.isThinking,
+        );
+      });
+
+      // If it was the last user message, maybe we should re-trigger processing?
+      // User didn't ask for re-trigger, just editing. Assuming just for record correction.
+      // If user wants to re-process, they'd likely just send a new message.
+      // But for a brainstorm flow, editing often implies "I meant this".
+      // Let's ask via toast or just save it. For now, simple edit.
+    }
   }
 
   void _abortProcessing() {
@@ -316,12 +389,24 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: Colors.transparent, // Allow HomeScreen gradient to show
       appBar: AppBar(
-        title: const Text("Idea Flow"),
+        title: const Text("Idea Flow", style: TextStyle(color: Colors.white)),
         elevation: 0,
         backgroundColor: Colors.transparent,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          // Settings Button
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: "Settings",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+          ),
           // Debug Button for Testing
           if (kDebugMode)
             IconButton(
@@ -352,9 +437,20 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
                   itemCount: _messages.length,
                   itemBuilder: (context, index) {
                     final msg = _messages[index];
+                    // Only pass the stream to the very last message if it's AI
+                    // This creates the "live reading" effect
+                    final isLast = index == _messages.length - 1;
                     return _FadeInUp(
                       key: ValueKey(msg.text.hashCode),
-                      child: _ChatBubble(message: msg),
+                      child: _ChatBubble(
+                        message: msg,
+                        onEdit: msg.isUser
+                            ? () => _editMessage(index, msg.text)
+                            : null,
+                        currentWordStream: (isLast && !msg.isUser)
+                            ? ref.read(ttsServiceProvider).currentWordStream
+                            : null,
+                      ),
                     );
                   },
                 ),
@@ -381,9 +477,7 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
                             vertical: 16,
                           ),
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.surface.withValues(
-                              alpha: 0.9,
-                            ),
+                            color: Colors.black.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(30),
                             border: Border.all(
                               color: theme.colorScheme.error.withValues(
@@ -413,7 +507,7 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
                                     : _liveTranscript,
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color: theme.colorScheme.onSurface,
+                                  color: Colors.white,
                                 ),
                               ),
                             ],
@@ -459,7 +553,7 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
                     ? "AI is thinking..."
                     : "Hold to speak your idea",
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  color: Colors.white70,
                 ),
               ),
               const SizedBox(height: 30),
@@ -485,8 +579,14 @@ class ChatMessage {
 
 class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
+  final Stream<String>? currentWordStream;
+  final VoidCallback? onEdit;
 
-  const _ChatBubble({required this.message});
+  const _ChatBubble({
+    required this.message,
+    this.currentWordStream,
+    this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -505,77 +605,103 @@ class _ChatBubble extends StatelessWidget {
           if (isAI) _Avatar(isAI: true, label: "AI"),
           const SizedBox(width: 8),
           Flexible(
-            child: ClipRRect(
-              // Clip for blur effect
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(20),
-                topRight: const Radius.circular(20),
-                bottomLeft: Radius.circular(isAI ? 0 : 20),
-                bottomRight: Radius.circular(isAI ? 20 : 0),
-              ),
-              child: BackdropFilter(
-                filter: isAI
-                    ? ImageFilter.blur(sigmaX: 10, sigmaY: 10)
-                    : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  // Clip for blur effect
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(20),
+                    topRight: const Radius.circular(20),
+                    bottomLeft: Radius.circular(isAI ? 0 : 20),
+                    bottomRight: Radius.circular(isAI ? 20 : 0),
                   ),
-                  decoration: BoxDecoration(
-                    gradient: isAI
-                        ? LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              theme.colorScheme.surfaceContainerHighest
-                                  .withValues(alpha: 0.5),
-                              theme.colorScheme.surfaceContainerHighest
-                                  .withValues(alpha: 0.3),
-                            ],
-                          )
-                        : LinearGradient(
-                            colors: [
-                              theme.colorScheme.primary,
-                              theme.colorScheme.primary.withValues(alpha: 0.8),
-                            ],
-                          ),
-                    border: isAI
-                        ? Border.all(
-                            color: theme.colorScheme.outline.withValues(
-                              alpha: 0.1,
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isAI
+                            ? Colors.white.withValues(
+                                alpha: 0.1,
+                              ) // Glassy White
+                            : theme.colorScheme.primary.withValues(alpha: 0.8),
+                        border: isAI
+                            ? Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                              )
+                            : null,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(20),
+                          topRight: const Radius.circular(20),
+                          bottomLeft: Radius.circular(isAI ? 0 : 20),
+                          bottomRight: Radius.circular(isAI ? 20 : 0),
+                        ),
+                      ),
+                      child: message.isThinking
+                          ? _ThinkingIndicator()
+                          : MarkdownBody(
+                              data: message.text,
+                              selectable: true, // Enable text selection
+                              styleSheet: MarkdownStyleSheet(
+                                p: TextStyle(
+                                  color: Colors
+                                      .white, // Always white on dark gradient
+                                  fontSize: 15,
+                                  height: 1.4,
+                                  fontFamily: isAI ? null : 'Inter',
+                                ),
+                                listBullet: const TextStyle(
+                                  color: Colors.white,
+                                ),
+                                code: TextStyle(
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                  color: Colors.white,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
                             ),
-                          )
-                        : null,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(20),
-                      topRight: const Radius.circular(20),
-                      bottomLeft: Radius.circular(isAI ? 0 : 20),
-                      bottomRight: Radius.circular(isAI ? 20 : 0),
                     ),
                   ),
-                  child: message.isThinking
-                      ? _ThinkingIndicator()
-                      : MarkdownBody(
-                          data: message.text,
-                          styleSheet: MarkdownStyleSheet(
-                            p: TextStyle(
-                              color: isAI
-                                  ? theme.colorScheme.onSurface
-                                  : theme.colorScheme.onPrimary,
-                              fontSize: 15,
-                              height: 1.4,
-                              fontFamily: isAI ? null : 'Inter',
-                            ),
-                            listBullet: TextStyle(
-                              color: isAI
-                                  ? theme.colorScheme.onSurface
-                                  : theme.colorScheme.onPrimary,
+                ),
+                // Karaoke / Live Caption Widget
+                if (isAI && currentWordStream != null)
+                  StreamBuilder<String>(
+                    stream: currentWordStream,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 4, left: 4),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            snapshot.data!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSecondaryContainer,
                             ),
                           ),
                         ),
-                ),
-              ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 8),

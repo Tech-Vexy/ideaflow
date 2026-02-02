@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'secure_storage_service.dart';
 
 class WatsonService {
   // Use the standard IBM IAM endpoint for tokens
@@ -13,8 +14,10 @@ class WatsonService {
   final String _ttsUrl =
       "https://api.us-south.text-to-speech.watson.cloud.ibm.com/v1/synthesize";
 
-  final String _apiKey = "5HbZ-Borj7c_tqgvHrKosIRklcUZZmjU8TjY_MZ4lcFK";
-  final String _projectId = "37a77f3e-f608-434e-9f0f-9408649a6ed9";
+  // Removed hardcoded keys
+  final SecureStorageService _secureStorage;
+
+  WatsonService(this._secureStorage);
 
   // Cache token
   String? _cachedToken;
@@ -28,13 +31,21 @@ class WatsonService {
       return _cachedToken;
     }
 
+    final creds = await _secureStorage.getWatsonCredentials();
+    final apiKey = creds['apiKey'];
+
+    if (apiKey == null || apiKey.isEmpty) {
+      debugPrint("Watson API Key missing.");
+      return null;
+    }
+
     try {
       final response = await http.post(
         Uri.parse(_iamUrl),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: {
           'grant_type': 'urn:ibm:params:oauth:grant-type:apikey',
-          'apikey': _apiKey,
+          'apikey': apiKey,
         },
       );
       if (response.statusCode == 200) {
@@ -99,90 +110,86 @@ Summarize this idea, suggest a tech stack, and then ask inquisitive follow-up qu
 AI: """;
     }
 
-    final streamUrl = _wmlUrl.replaceFirst("generation", "generation_stream");
+    final creds = await _secureStorage.getWatsonCredentials();
+    final projectId = creds['projectId'];
+    final configUrl = creds['url'];
 
-    try {
-      final request = http.Request('POST', Uri.parse(streamUrl));
-      request.headers.addAll({
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      });
-      request.body = jsonEncode({
-        "input": promptInput,
-        "model_id": "ibm/granite-3-3-8b-instruct",
-        "project_id": _projectId,
-        "parameters": {
-          "max_new_tokens": 500, // Increased limit for streaming
-          "decoding_method": "greedy",
-          "repetition_penalty": 1.1,
-        },
-      });
+    // Determine Base URL
+    String baseUrl = _wmlUrl; // Default to US-South hardcoded
+    if (configUrl != null && configUrl.isNotEmpty) {
+      if (!configUrl.contains("/ml/v1")) {
+        baseUrl = "$configUrl/ml/v1/text/generation?version=2024-05-31";
+      } else {
+        baseUrl = configUrl;
+      }
+    }
 
-      final response = await request.send();
+    final streamUrl = baseUrl.replaceFirst("generation", "generation_stream");
 
-      if (response.statusCode == 200) {
-        final stream = response.stream
-            .transform(utf8.decoder)
-            .transform(const LineSplitter());
+    if (projectId == null || projectId.isEmpty) {
+      debugPrint("Watson Project ID missing.");
+      yield "Please configure Watson Project ID in Settings.";
+      return;
+    }
+    final request = http.Request('POST', Uri.parse(streamUrl));
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+      'Accept': 'application/json',
+    });
+    request.body = jsonEncode({
+      "input": promptInput,
+      "model_id": "ibm/granite-3-3-8b-instruct",
+      "project_id": projectId,
+      "parameters": {
+        "max_new_tokens": 500, // Increased limit for streaming
+        "decoding_method": "greedy",
+        "repetition_penalty": 1.1,
+      },
+    });
 
-        await for (final line in stream) {
-          if (line.startsWith("data: ")) {
-            final dataStr = line.substring(6);
-            if (dataStr == "[DONE]") {
-              break;
-            }
-            try {
-              // Watson stream format usually sends JSON chunks
-              // If dataStr is empty or simple keep-alive, skip.
-              if (dataStr.trim().isEmpty) continue;
+    final response = await request.send();
 
-              final data = jsonDecode(dataStr);
-              // Structure: { "results": [ { "generated_text": "...", "generated_token_count": ... } ] }
-              if (data['results'] != null && data['results'].isNotEmpty) {
-                final text = data['results'][0]['generated_text'];
-                if (text != null) {
-                  yield text;
-                }
+    if (response.statusCode == 200) {
+      final stream = response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+
+      await for (final line in stream) {
+        if (line.startsWith("data: ")) {
+          final dataStr = line.substring(6);
+          if (dataStr == "[DONE]") {
+            break;
+          }
+          try {
+            // Watson stream format usually sends JSON chunks
+            // If dataStr is empty or simple keep-alive, skip.
+            if (dataStr.trim().isEmpty) continue;
+
+            final data = jsonDecode(dataStr);
+            // Structure: { "results": [ { "generated_text": "...", "generated_token_count": ... } ] }
+            if (data['results'] != null && data['results'].isNotEmpty) {
+              final text = data['results'][0]['generated_text'];
+              if (text != null) {
+                yield text;
               }
-            } catch (e) {
-              debugPrint("Error parsing SSE chunk: $e");
             }
+          } catch (e) {
+            debugPrint("Error parsing SSE chunk: $e");
           }
         }
-      } else {
-        debugPrint(
-          "Watson Stream API error: ${response.statusCode} ${response.reasonPhrase}",
-        );
       }
-    } catch (e) {
-      debugPrint("Watson Stream Error: $e");
+    } else {
+      debugPrint(
+        "Watson Stream API error: ${response.statusCode} ${response.reasonPhrase}",
+      );
     }
   }
 
-  // Keeping the original Future-based method for compatibility or fallback, but refactoring it to use the same logic if needed.
-  // For now, we leave analyzeIdea as is or deprecated.
   Future<String?> analyzeIdea(
     String currentTranscript, {
     String? previousContext,
   }) async {
-    // ... (Existing implementation kept for now, or could call stream and join)
-    // For brevity and compliance with instruction, I am replacing the method block.
-    // If I need to KEEP the old method, I should have used multi_replace or defined the range carefully.
-    // The instruction implied replacing the logic. I will rewrite analyzeIdea to collect the stream for backward compatibility if needed,
-    // OR just replace it with the new signature if I update consumers.
-    // I will ADD analyzeIdeaStream and KEEP analyzeIdea for now to avoid breaking VoiceService immediately.
-    // Wait, the tool is REPLACE. I must replace the target content.
-    // I will replace the entire analyzeIdea method with BOTH methods, ensuring migration.
-
-    // Actually, I'll update analyzeIdea to use the stream internally to be safe, OR return the full string.
-    // But better to expose the stream.
-
-    // I will return the original implementation of analyzeIdea + the new stream method.
-    // Since I cannot do "append", I have to provide the full replacement.
-
-    // RE-USING ORIGINAL LOGIC FOR analyzeIdea TO MINIMIZE RISK, ADDING analyzeIdeaStream.
-
     return _analyzeIdeaLegacy(
       currentTranscript,
       previousContext: previousContext,
@@ -193,7 +200,6 @@ AI: """;
     String currentTranscript, {
     String? previousContext,
   }) async {
-    // (Original logic copied here for safety)
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
 
@@ -209,17 +215,36 @@ AI: """;
           "Summarize this idea and suggest one tech stack: $currentTranscript";
     }
 
+    final creds = await _secureStorage.getWatsonCredentials();
+    final projectId = creds['projectId'];
+    final configUrl = creds['url'];
+
+    // Determine Base URL
+    String baseUrl = _wmlUrl;
+    if (configUrl != null && configUrl.isNotEmpty) {
+      if (!configUrl.contains("/ml/v1")) {
+        baseUrl = "$configUrl/ml/v1/text/generation?version=2024-05-31";
+      } else {
+        baseUrl = configUrl;
+      }
+    }
+
+    if (projectId == null || projectId.isEmpty) {
+      debugPrint("Watson Project ID missing.");
+      return "Please configure Watson Project ID in Settings.";
+    }
+
     try {
       final response = await http.post(
-        Uri.parse(_wmlUrl),
+        Uri.parse(baseUrl),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer \$token',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
           "input": promptInput,
           "model_id": "ibm/granite-3-3-8b-instruct",
-          "project_id": _projectId,
+          "project_id": projectId,
           "parameters": {
             "max_new_tokens": 300,
             "decoding_method": "greedy",
@@ -229,9 +254,11 @@ AI: """;
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body)['results'][0]['generated_text'];
+      } else {
+        debugPrint("Watson Error: ${response.statusCode} ${response.body}");
       }
     } catch (e) {
-      debugPrint("Legacy Watson Error: \$e");
+      debugPrint("Legacy Watson Error: $e");
     }
     return null;
   }

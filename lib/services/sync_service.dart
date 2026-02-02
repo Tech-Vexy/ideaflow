@@ -1,16 +1,44 @@
 import 'package:flutter/foundation.dart';
 import 'firebase_service.dart';
 import 'hive_service.dart';
+import 'secure_storage_service.dart';
 
 class SyncService {
   final FirebaseService _firebaseService;
   final HiveService _hiveService;
+  final SecureStorageService _secureStorage;
 
-  SyncService(this._firebaseService, this._hiveService);
+  SyncService(this._firebaseService, this._hiveService, this._secureStorage);
 
   Future<void> syncFromCloud() async {
     try {
       debugPrint("Starting cloud sync...");
+
+      // 0. Sync Global Config (API Keys)
+      final globalConfig = await _firebaseService.getGlobalConfig();
+      if (globalConfig != null) {
+        debugPrint("Syncing Global API Keys...");
+
+        if (globalConfig.containsKey('groq')) {
+          final groqConfig = Map<String, dynamic>.from(
+            globalConfig['groq'] as Map,
+          );
+          if (groqConfig['apiKey'] != null) {
+            await _secureStorage.saveGroqApiKey(groqConfig['apiKey']);
+          }
+        }
+
+        if (globalConfig.containsKey('watson')) {
+          final watsonConfig = Map<String, dynamic>.from(
+            globalConfig['watson'] as Map,
+          );
+          await _secureStorage.saveWatsonCredentials(
+            apiKey: watsonConfig['apiKey'] ?? '',
+            projectId: watsonConfig['projectId'] ?? '',
+            url: watsonConfig['url'] ?? '',
+          );
+        }
+      }
 
       // 1. Sync Ideas
       final remoteIdeas = await _firebaseService.getIdeas();

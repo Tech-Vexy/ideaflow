@@ -70,3 +70,52 @@ class BrainstormSession extends HiveObject {
         sessionDate: DateTime.parse(json['sessionDate']),
       );
 }
+
+@HiveType(typeId: 2)
+class ArrayChatMessage extends HiveObject {
+  @HiveField(0)
+  final String id;
+
+  @HiveField(1)
+  final String ideaId;
+
+  @HiveField(2)
+  final String text;
+
+  @HiveField(3)
+  final bool isUser;
+
+  @HiveField(4)
+  final DateTime timestamp;
+
+  @HiveField(5, defaultValue: false)
+  final bool isThinking;
+
+  ArrayChatMessage({
+    required this.id,
+    required this.ideaId,
+    required this.text,
+    required this.isUser,
+    required this.timestamp,
+    this.isThinking = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'ideaId': ideaId,
+    'text': text,
+    'isUser': isUser,
+    'timestamp': timestamp.toIso8601String(),
+    'isThinking': isThinking,
+  };
+
+  factory ArrayChatMessage.fromJson(Map<String, dynamic> json) =>
+      ArrayChatMessage(
+        id: json['id'],
+        ideaId: json['ideaId'],
+        text: json['text'],
+        isUser: json['isUser'],
+        timestamp: DateTime.parse(json['timestamp']),
+        isThinking: json['isThinking'] ?? false,
+      );
+}
