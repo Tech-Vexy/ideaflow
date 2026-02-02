@@ -18,11 +18,12 @@ class TtsService {
     await _flutterTts.setLanguage("en-US");
     await _flutterTts.setPitch(1.0);
 
-    // Android TTS is often too fast at 1.0. iOS is usually fine.
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    // Android and Web are often faster than iOS at default rates.
+    // Setting both to 0.4 to ensure consistency.
+    if (kIsWeb || defaultTargetPlatform == TargetPlatform.android) {
       await _flutterTts.setSpeechRate(0.4);
     } else {
-      await _flutterTts.setSpeechRate(0.5); // Slightly slower for iOS too
+      await _flutterTts.setSpeechRate(0.5); // iOS
     }
 
     _flutterTts.setProgressHandler((text, start, endOffset, word) {
