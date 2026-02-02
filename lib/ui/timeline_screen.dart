@@ -30,122 +30,170 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
     final isSearching = ref.watch(searchQueryProvider).isNotEmpty;
     final theme = Theme.of(context);
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        await ref.read(syncServiceProvider).syncFromCloud();
-      },
-      child: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 800),
-          child: CustomScrollView(
-            slivers: [
-              SliverAppBar.large(
-                title: const Text("Your Ideas"),
-                centerTitle: false,
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.settings_outlined),
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const SettingsScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(60),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: SearchBar(
-                      controller: _searchController,
-                      hintText: "Search ideas...",
-                      leading: const Icon(Icons.search, color: Colors.grey),
-                      onChanged: (value) {
-                        ref.read(searchQueryProvider.notifier).update(value);
-                      },
-                      elevation: WidgetStateProperty.all(0),
-                      backgroundColor: WidgetStateProperty.all(
-                        theme.colorScheme.surfaceContainerHighest.withValues(
-                          alpha: 0.5,
-                        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Your Ideas"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: SearchBar(
+              controller: _searchController,
+              hintText: "Search ideas...",
+              leading: const Icon(Icons.search, color: Colors.grey),
+              onChanged: (value) {
+                ref.read(searchQueryProvider.notifier).update(value);
+              },
+              elevation: WidgetStateProperty.all(0),
+              backgroundColor: WidgetStateProperty.all(
+                theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.5,
+                ),
+              ),
+              trailing: isSearching
+                  ? [
+                      IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          ref.read(searchQueryProvider.notifier).update('');
+                        },
                       ),
-                      trailing: isSearching
-                          ? [
-                              IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  ref
-                                      .read(searchQueryProvider.notifier)
-                                      .update('');
-                                },
-                              ),
-                            ]
-                          : null,
-                    ),
+                    ]
+                  : null,
+            ),
+          ),
+
+          if (isSearching)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "${ideas.length} ${ideas.length == 1 ? 'match' : 'matches'} found",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              if (isSearching)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 8,
+            ),
+
+          // List
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                await ref.read(syncServiceProvider).syncFromCloud();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Sync Complete"),
+                      duration: Duration(seconds: 1),
                     ),
-                    child: Text(
-                      "${ideas.length} ${ideas.length == 1 ? 'match' : 'matches'} found",
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              if (ideas.isEmpty)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          isSearching
-                              ? Icons.search_off
-                              : Icons.lightbulb_outline,
-                          size: 48,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          isSearching
-                              ? "No matching ideas found."
-                              : "No ideas yet. Start a flow!",
-                          style: theme.textTheme.bodyMedium?.copyWith(
+                  );
+                }
+              },
+              child: ideas.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isSearching
+                                ? Icons.search_off
+                                : Icons.lightbulb_outline,
+                            size: 48,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    final idea = ideas[index];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                          const SizedBox(height: 16),
+                          Text(
+                            isSearching
+                                ? "No matching ideas found."
+                                : "No ideas yet. Start a flow!",
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
-                      child: _IdeaCard(idea: idea),
-                    );
-                  }, childCount: ideas.length),
-                ),
-            ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      itemCount: ideas.length,
+                      itemBuilder: (context, index) {
+                        final idea = ideas[index];
+                        return Dismissible(
+                          key: ValueKey(idea.id),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            color: Colors.redAccent,
+                            child: const Icon(
+                              Icons.delete,
+                              color: Colors.white,
+                            ),
+                          ),
+                          confirmDismiss: (direction) async {
+                            return await showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text("Delete Idea?"),
+                                content: const Text(
+                                  "This action cannot be undone.",
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(false),
+                                    child: const Text("Cancel"),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(true),
+                                    child: const Text(
+                                      "Delete",
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          onDismissed: (direction) {
+                            ref.read(hiveServiceProvider).deleteIdea(idea.id);
+                            ref
+                                .read(firebaseServiceProvider)
+                                .deleteIdea(idea.id);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Idea deleted")),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            child: _IdeaCard(idea: idea),
+                          ),
+                        );
+                      },
+                    ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -231,14 +279,20 @@ class _IdeaCard extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  idea.title,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    height: 1.2,
+                Hero(
+                  tag: 'idea-title-${idea.id}',
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Text(
+                      idea.title,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 12),
                 Row(

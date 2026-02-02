@@ -6,6 +6,7 @@ import 'ui/auth_gate.dart';
 import 'firebase_options.dart';
 import 'providers.dart';
 import 'services/hive_service.dart';
+import 'package:quick_actions/quick_actions.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,15 +23,51 @@ void main() async {
   );
 }
 
-class IdeaFlowApp extends StatelessWidget {
+class IdeaFlowApp extends ConsumerStatefulWidget {
   const IdeaFlowApp({super.key});
 
   @override
+  ConsumerState<IdeaFlowApp> createState() => _IdeaFlowAppState();
+}
+
+class _IdeaFlowAppState extends ConsumerState<IdeaFlowApp> {
+  @override
+  void initState() {
+    super.initState();
+    _initQuickActions();
+  }
+
+  void _initQuickActions() {
+    const QuickActions quickActions = QuickActions();
+    quickActions.initialize((shortcutType) {
+      if (shortcutType == 'new_idea') {
+        // Navigate to Flow tab (ConversationalScreen is index 0 of HomeScreen)
+        // Since AuthGate loads HomeScreen, and HomeScreen defaults to index 0,
+        // we might not need explicit navigation if we are freshly launching.
+        // But if app is running, we might need a global key to navigate.
+        // For simplicity, we'll let it just open.
+        // Enhancement: We can use a GlobalKey<NavigatorState> or Riverpod to switch tabs.
+        debugPrint('Quick Action: New Idea');
+      }
+    });
+
+    quickActions.setShortcutItems(<ShortcutItem>[
+      const ShortcutItem(
+        type: 'new_idea',
+        localizedTitle: 'New Idea',
+        icon:
+            'add', // Ensure 'add' icon exists in android/app/src/main/res/drawable or ios/Runner/Assets.xcassets
+      ),
+    ]);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'IdeaFlow',
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       theme: ThemeData.light().copyWith(
         scaffoldBackgroundColor: Colors.grey[50], // Light background
         colorScheme: const ColorScheme.light(

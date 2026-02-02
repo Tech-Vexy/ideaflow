@@ -21,6 +21,12 @@ class FirebaseService {
     await _db.ref('users/$uid/ideas/${idea.id}').set(idea.toJson());
   }
 
+  Future<void> deleteIdea(String ideaId) async {
+    final uid = _userId;
+    if (uid == null) return;
+    await _db.ref('users/$uid/ideas/$ideaId').remove();
+  }
+
   Future<void> saveSession(BrainstormSession session) async {
     final uid = _userId;
     if (uid == null) return;

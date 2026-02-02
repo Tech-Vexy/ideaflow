@@ -5,10 +5,12 @@ import 'package:uuid/uuid.dart';
 class HiveService {
   static const String ideasBoxName = 'ideas';
   static const String sessionsBoxName = 'sessions';
+  static const String settingsBoxName = 'settings';
 
   Box<Idea> get ideasBox => Hive.box<Idea>(ideasBoxName);
   Box<BrainstormSession> get sessionsBox =>
       Hive.box<BrainstormSession>(sessionsBoxName);
+  Box<dynamic> get settingsBox => Hive.box<dynamic>(settingsBoxName);
 
   Future<void> init() async {
     await Hive.initFlutter();
@@ -18,6 +20,16 @@ class HiveService {
     await Hive.openBox<Idea>(ideasBoxName);
     await Hive.openBox<BrainstormSession>(sessionsBoxName);
     await Hive.openBox<ArrayChatMessage>('messages');
+    await Hive.openBox<dynamic>(settingsBoxName);
+  }
+
+  // Settings
+  String getThemeMode() {
+    return settingsBox.get('themeMode', defaultValue: 'system') as String;
+  }
+
+  Future<void> updateThemeMode(String mode) async {
+    await settingsBox.put('themeMode', mode);
   }
 
   // CRUD for Ideas
@@ -26,8 +38,9 @@ class HiveService {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  Stream<List<Idea>> watchIdeas() {
-    return ideasBox.watch().map((_) => getIdeas());
+  Stream<List<Idea>> watchIdeas() async* {
+    yield getIdeas();
+    yield* ideasBox.watch().map((_) => getIdeas());
   }
 
   Future<Idea> createIdea(String title) async {
@@ -48,6 +61,12 @@ class HiveService {
   Future<void> saveMessage(ArrayChatMessage message) async {
     final box = Hive.box<ArrayChatMessage>('messages');
     await box.put(message.id, message);
+  }
+
+  List<ArrayChatMessage> getMessagesForIdea(String ideaId) {
+    final box = Hive.box<ArrayChatMessage>('messages');
+    return box.values.where((m) => m.ideaId == ideaId).toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
   }
 
   // CRUD for Sessions
@@ -73,11 +92,13 @@ class HiveService {
       ..sort((a, b) => b.sessionDate.compareTo(a.sessionDate));
   }
 
-  Stream<List<BrainstormSession>> watchSessionsForIdea(String ideaId) {
-    return sessionsBox.watch().map((_) => getSessionsForIdea(ideaId));
+  Stream<List<BrainstormSession>> watchSessionsForIdea(String ideaId) async* {
+    yield getSessionsForIdea(ideaId);
+    yield* sessionsBox.watch().map((_) => getSessionsForIdea(ideaId));
   }
 
-  Stream<List<BrainstormSession>> watchAllSessions() {
-    return sessionsBox.watch().map((_) => sessionsBox.values.toList());
+  Stream<List<BrainstormSession>> watchAllSessions() async* {
+    yield sessionsBox.values.toList();
+    yield* sessionsBox.watch().map((_) => sessionsBox.values.toList());
   }
 }

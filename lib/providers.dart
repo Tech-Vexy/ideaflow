@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+export 'providers/theme_provider.dart';
 import 'services/voice_service.dart';
 import 'services/watson_service.dart';
 import 'services/offline_ai_service.dart';

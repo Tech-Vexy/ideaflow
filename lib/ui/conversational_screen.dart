@@ -3,15 +3,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:uuid/uuid.dart';
 import '../providers.dart';
+import '../services/tts_service.dart';
 import '../models/models.dart';
 import 'settings_screen.dart';
 
 class ConversationalScreen extends ConsumerStatefulWidget {
-  const ConversationalScreen({super.key});
+  final Idea? initialIdea;
+  const ConversationalScreen({super.key, this.initialIdea});
 
   @override
   ConsumerState<ConversationalScreen> createState() =>
@@ -23,6 +24,7 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
   bool _isInit = false;
   bool _isRecording = false;
   String _liveTranscript = "";
+  String? _currentIdeaId; // Track current idea ID
   final ScrollController _scrollController = ScrollController();
 
   bool _isProcessing = false;
@@ -64,11 +66,37 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_isInit) {
-      _greetUser();
+      if (widget.initialIdea != null) {
+        _currentIdeaId = widget.initialIdea!.id;
+        _loadHistory();
+      } else {
+        _greetUser();
+      }
       // Sync from cloud on init
       ref.read(syncServiceProvider).syncFromCloud();
       _isInit = true;
     }
+  }
+
+  void _loadHistory() {
+    final messages = ref
+        .read(hiveServiceProvider)
+        .getMessagesForIdea(widget.initialIdea!.id);
+
+    setState(() {
+      for (final msg in messages) {
+        _messages.add(
+          ChatMessage(text: msg.text, isUser: msg.isUser, isThinking: false),
+        );
+      }
+      if (_messages.isEmpty) {
+        // Fallback greeting if no messages found for idea
+        _greetUser();
+      } else {
+        // Just scroll to bottom
+        _scrollToBottom();
+      }
+    });
   }
 
   void _greetUser() {
@@ -272,11 +300,28 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
     final hiveService = ref.read(hiveServiceProvider);
     final firebaseService = ref.read(firebaseServiceProvider);
 
-    final title = transcript.length > 30
-        ? "${transcript.substring(0, 30)}..."
-        : transcript;
+    late Idea idea;
+    if (_currentIdeaId != null) {
+      // Update existing idea timestamp? Optional.
+      // For now, just append session.
+      // We need the Idea object.
+      // If we continued, widget.initialIdea holds it.
+      // Or we can fetch it.
+      // But creating a NEW idea object allows updating title?
+      // Let's assume title doesn't change for now.
+      // We need to return an Idea object to link sessions.
+      final ideas = hiveService.getIdeas(); // This is slow if many ideas.
+      // Optimization: getIdeaById
+      idea =
+          widget.initialIdea ?? ideas.firstWhere((i) => i.id == _currentIdeaId);
+    } else {
+      final title = transcript.length > 30
+          ? "${transcript.substring(0, 30)}..."
+          : transcript;
+      idea = await hiveService.createIdea(title);
+      _currentIdeaId = idea.id; // Set ID for subsequent turns
+    }
 
-    final idea = await hiveService.createIdea(title);
     final session = await hiveService.addSession(
       idea.id,
       transcript,
@@ -389,12 +434,8 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: Colors.transparent, // Allow HomeScreen gradient to show
       appBar: AppBar(
-        title: const Text("Idea Flow", style: TextStyle(color: Colors.white)),
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text("Idea Flow"),
         actions: [
           // Settings Button
           IconButton(
@@ -423,38 +464,33 @@ class _ConversationalScreenState extends ConsumerState<ConversationalScreen> {
       body: Column(
         children: [
           Expanded(
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    top: 10,
-                    bottom: 20,
-                  ),
-                  itemCount: _messages.length,
-                  itemBuilder: (context, index) {
-                    final msg = _messages[index];
-                    // Only pass the stream to the very last message if it's AI
-                    // This creates the "live reading" effect
-                    final isLast = index == _messages.length - 1;
-                    return _FadeInUp(
-                      key: ValueKey(msg.text.hashCode),
-                      child: _ChatBubble(
-                        message: msg,
-                        onEdit: msg.isUser
-                            ? () => _editMessage(index, msg.text)
-                            : null,
-                        currentWordStream: (isLast && !msg.isUser)
-                            ? ref.read(ttsServiceProvider).currentWordStream
-                            : null,
-                      ),
-                    );
-                  },
-                ),
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 10,
+                bottom: 20,
               ),
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                // Only pass the stream to the very last message if it's AI
+                // This creates the "live reading" effect
+                final isLast = index == _messages.length - 1;
+                return _FadeInUp(
+                  key: ValueKey(msg.text.hashCode),
+                  child: _ChatBubble(
+                    message: msg,
+                    onEdit: msg.isUser
+                        ? () => _editMessage(index, msg.text)
+                        : null,
+                    currentWordStream: (isLast && !msg.isUser)
+                        ? ref.read(ttsServiceProvider).currentWordStream
+                        : null,
+                  ),
+                );
+              },
             ),
           ),
 
@@ -579,7 +615,7 @@ class ChatMessage {
 
 class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
-  final Stream<String>? currentWordStream;
+  final Stream<TtsProgress>? currentWordStream;
   final VoidCallback? onEdit;
 
   const _ChatBubble({
@@ -592,7 +628,6 @@ class _ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isAI = !message.isUser;
-    final user = FirebaseAuth.instance.currentUser;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -609,7 +644,6 @@ class _ChatBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ClipRRect(
-                  // Clip for blur effect
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(20),
                     topRight: const Radius.circular(20),
@@ -625,9 +659,7 @@ class _ChatBubble extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: isAI
-                            ? Colors.white.withValues(
-                                alpha: 0.1,
-                              ) // Glassy White
+                            ? Colors.white.withValues(alpha: 0.1)
                             : theme.colorScheme.primary.withValues(alpha: 0.8),
                         border: isAI
                             ? Border.all(
@@ -643,63 +675,135 @@ class _ChatBubble extends StatelessWidget {
                       ),
                       child: message.isThinking
                           ? _ThinkingIndicator()
-                          : MarkdownBody(
-                              data: message.text,
-                              selectable: true, // Enable text selection
-                              styleSheet: MarkdownStyleSheet(
-                                p: TextStyle(
-                                  color: Colors
-                                      .white, // Always white on dark gradient
-                                  fontSize: 15,
-                                  height: 1.4,
-                                  fontFamily: isAI ? null : 'Inter',
-                                ),
-                                listBullet: const TextStyle(
-                                  color: Colors.white,
-                                ),
-                                code: TextStyle(
-                                  backgroundColor: Colors.black.withValues(
-                                    alpha: 0.3,
+                          : (isAI && currentWordStream != null)
+                          ? StreamBuilder<TtsProgress>(
+                              stream: currentWordStream,
+                              builder: (context, snapshot) {
+                                int start = -1;
+                                int end = -1;
+                                if (snapshot.hasData) {
+                                  start = snapshot.data!.start;
+                                  end = snapshot.data!.end;
+                                }
+                                // Bounds check
+                                if (start < 0 ||
+                                    end > message.text.length ||
+                                    start >= end) {
+                                  start = -1;
+                                  end = -1;
+                                }
+                                return SelectableText.rich(
+                                  TextSpan(
+                                    children: [
+                                      TextSpan(
+                                        text: start > 0
+                                            ? message.text.substring(0, start)
+                                            : "",
+                                        style: theme.textTheme.bodyLarge
+                                            ?.copyWith(
+                                              color:
+                                                  theme.colorScheme.onSurface,
+                                              height: 1.5,
+                                            ),
+                                      ),
+                                      if (start >= 0)
+                                        TextSpan(
+                                          text: message.text.substring(
+                                            start,
+                                            end,
+                                          ),
+                                          style: theme.textTheme.bodyLarge
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onPrimaryContainer,
+                                                backgroundColor: theme
+                                                    .colorScheme
+                                                    .primaryContainer,
+                                                height: 1.5,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                      TextSpan(
+                                        text: end >= 0
+                                            ? message.text.substring(end)
+                                            : message.text,
+                                        style: theme.textTheme.bodyLarge
+                                            ?.copyWith(
+                                              color:
+                                                  theme.colorScheme.onSurface,
+                                              height: 1.5,
+                                            ),
+                                      ),
+                                    ],
                                   ),
-                                  color: Colors.white,
-                                  fontFamily: 'monospace',
-                                ),
+                                );
+                              },
+                            )
+                          : SelectableText(
+                              message.text,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: isAI
+                                    ? theme.colorScheme.onSurface
+                                    : theme.colorScheme.onPrimary,
+                                height: 1.5,
                               ),
                             ),
                     ),
                   ),
                 ),
-                // Karaoke / Live Caption Widget
-                if (isAI && currentWordStream != null)
-                  StreamBuilder<String>(
-                    stream: currentWordStream,
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 4, left: 4),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.secondaryContainer,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            snapshot.data!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSecondaryContainer,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+
+                // TTS Controls for AI
+                if (isAI)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Consumer(
+                      builder: (context, ref, child) {
+                        final tts = ref.watch(ttsServiceProvider);
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: tts.isPlaying,
+                          builder: (context, isPlaying, _) {
+                            if (!isPlaying) {
+                              return IconButton(
+                                icon: const Icon(Icons.volume_up_rounded),
+                                iconSize: 20,
+                                color: theme.colorScheme.primary.withValues(
+                                  alpha: 0.7,
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: "Read Aloud",
+                                onPressed: () => tts.speak(message.text),
+                              );
+                            }
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.pause_rounded),
+                                  iconSize: 20,
+                                  color: theme.colorScheme.primary,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: "Pause",
+                                  onPressed: () => tts.pause(),
+                                ),
+                                const SizedBox(width: 16),
+                                IconButton(
+                                  icon: const Icon(Icons.stop_rounded),
+                                  iconSize: 20,
+                                  color: Colors.redAccent,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: "Stop",
+                                  onPressed: () => tts.stop(),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
               ],
             ),
@@ -708,7 +812,10 @@ class _ChatBubble extends StatelessWidget {
           if (!isAI)
             _Avatar(
               isAI: false,
-              label: user?.displayName?[0].toUpperCase() ?? "U",
+              label:
+                  FirebaseAuth.instance.currentUser?.displayName?[0]
+                      .toUpperCase() ??
+                  "U",
             ),
         ],
       ),

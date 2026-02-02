@@ -39,6 +39,47 @@ class SettingsScreen extends ConsumerWidget {
             const Divider(),
           ],
 
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              "Appearance",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(
+                  value: ThemeMode.system,
+                  label: Text('System'),
+                  icon: Icon(Icons.brightness_auto),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.light,
+                  label: Text('Light'),
+                  icon: Icon(Icons.light_mode),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.dark,
+                  label: Text('Dark'),
+                  icon: Icon(Icons.dark_mode),
+                ),
+              ],
+              selected: {ref.watch(themeModeProvider)},
+              onSelectionChanged: (Set<ThemeMode> newSelection) {
+                ref
+                    .read(themeModeProvider.notifier)
+                    .setTheme(newSelection.first);
+              },
+            ),
+          ),
+          const Divider(),
+
           if (isAdmin) ...[
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
