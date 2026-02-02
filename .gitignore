@@ -51,7 +51,7 @@ app.*.map.json
 *.swp
 .buildlog/
 .history
-
+.netlify/
 
 
 # Flutter repo-specific
